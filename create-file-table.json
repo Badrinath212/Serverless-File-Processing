@@ -1,0 +1,25 @@
+{
+  "TableName": "FileMetaData",
+  "KeySchema": [ 
+	{
+             "AttributeName" : "fileId",
+	     "KeyType" : "HASH" 
+	}
+  ],
+  "AttributeDefinitions" : [ 
+	{
+
+	     "AttributeName" : "fileId",
+	     "AttributeType" : "S"
+	}
+  ],
+  "BillingMode" : "PAY_PER_REQUEST",
+  "Tags" : [
+         {
+            "Key": "Environment",
+	    "Value" : "Development"
+	 }
+   ]
+}
+
+               
