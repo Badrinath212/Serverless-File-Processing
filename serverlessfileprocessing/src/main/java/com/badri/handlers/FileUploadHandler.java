@@ -78,13 +78,19 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 			
 			String fileName = data.get("fileName");
 			
+			UUID uuid = UUID.randomUUID();
+			
+			String fileId = uuid.toString();
+			
+			String keyVal = fileId + "-" + fileName;
+			
 			String bucketName = "file-bucket";
 			
 			byte[] fileBytes = Base64.getDecoder().decode(data.get("fileContent"));
 			
 			PutObjectRequest req = PutObjectRequest.builder()
 					.bucket(bucketName)
-					.key(fileName)
+					.key(keyVal)
 					.build();
 			
 			S3CLIENT.putObject(req, RequestBody.fromBytes(fileBytes));
@@ -96,17 +102,21 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 			
 			String createdAt = Instant.now().toString();
 			
-			UUID uuid = UUID.randomUUID();
+			String status = "unprocessed";
 			
-			String fileId = uuid.toString();
+			int lineCount = 0;
 			
-			putItemInTable(ddc, tableName, bucketName, fileName, createdAt, fileId);
+			putItemInTable(ddc, tableName, bucketName, fileName, createdAt, fileId, status, lineCount);
 			
 			context.getLogger().log("meta data uploaded to the dynamodb table");
 			
 			allowS3ToTriggerLambda(LAMBDACLIENT);
 			
 			createS3Trigger("lksljflsjkflsdjflsdfjlsd");  // need to update this
+			
+			return new APIGatewayProxyResponseEvent()
+					.withStatusCode(201)
+					.withBody("data is uploaded to the clount");
 		
 		} catch(Exception e) {
 			return new APIGatewayProxyResponseEvent()
@@ -158,7 +168,7 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 			System.out.println("Trigger Created");
 		}
 	
-	public void putItemInTable(DynamoDbClient ddc, String tableName, String bucketName, String fileName, String createdAt, String fileId) {
+	public void putItemInTable(DynamoDbClient ddc, String tableName, String bucketName, String fileName, String createdAt, String fileId, String status,int lineCount) {
 		try {
 			
 			HashMap<String, AttributeValue> itemValues = new HashMap<>();
@@ -167,6 +177,8 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 			itemValues.put("bucketName", AttributeValue.builder().s(bucketName).build());
 			itemValues.put("s3Key", AttributeValue.builder().s(fileName).build());
 			itemValues.put("createdAt", AttributeValue.builder().s(createdAt).build());
+			itemValues.put("status", AttributeValue.builder().s(status).build());
+			itemValues.put("lineCount", AttributeValue.builder().n(String.valueOf(lineCount)));
 			PutItemRequest request = PutItemRequest.builder()
 					.item(itemValues)
 					.tableName(tableName)
