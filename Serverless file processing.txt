@@ -1,0 +1,243 @@
+Serverless File Processing System
+
+api gateway -> compute service -> storage -> security -> logging
+
+-lambda have the upload, process & fetch functions
+-s3 will store the file
+-dynamodb will store the file's metadata
+-gateway have endpoints get /files, post /upload, get /files/{id}
+-Iam will assign the different roles
+
+
+-- things do from the CLI 
+-Create S3 bucket
+-Create DynamoDB table
+-Create IAM roles & policies
+-Create Lambda functions
+-Create API Gateway routes
+
+Phase - 1
+
+-create lambda functions(code+config)
+  -- handlers
+    - upload
+    - process
+    - fetch (by id)
+
+Phase - 2
+
+-create s3 bucket , policies, role & dynamodb table from cli
+
+phase - 3 
+
+-api gateway integration
+
+Phase - 4 
+
+-event trigger after uploading file to s3 bucket for file processing
+
+
+
+
+-----------------------------------------------------------------------------
+
+- For creating the container 
+
+docker run -d `
+  --name localstack `
+  --network localstack-net `
+  -p 4566:4566 `
+  -p 4510-4559:4510-4559 `
+  -e SERVICES=lambda,s3,events,dynamodb,apigateway,iam `
+  -e LAMBDA_DOCKER_NETWORK=localstack-net `
+  -v /var/run/docker.sock:/var/run/docker.sock `
+  localstack/localstack
+
+- create s3 bucket 
+  aws s3 mb s3://file-bucket --endpoint-url http://localhost:4566
+  aws s3 ls --endpoint-url http://localhost:4566
+
+- create dynamodb table
+  - table attribues 
+     - fileId
+     - filename
+     - bucketName
+     - s3Key
+     - createdAt
+  aws dynamodb create-table --cli-input-json file://C:\Users\HP\OneDrive\Desktop\ServerlessFileProcessing\create-file-table.json --endpoint-url http://localhost:4566
+
+-- Steps to add the IAM service
+
+ - need to create the trust & permission json files
+ - create the IAM role : aws iam create-role `
+	 --role-name lambda-execution-role `
+	 --assume-role-policy-document file://C:\Users\HP\OneDrive\Desktop\ServerlessFileProcessing\trust-policy.json `
+	 --endpoint-url http://localhost:4566
+ - create permission policy in aws :  aws iam create-policy `
+	 --policy-name lambda-permissions `
+	 --policy-document file://C:\Users\HP\OneDrive\Desktop\ServerlessFileProcessing\permission-policy.json `
+	 --endpoint-url http://localhost:4566
+ - attach permission policy to role : aws iam attach-role-policy `
+	 --role-name lambda-execution-role `
+	 --policy-arn arn:aws:iam::000000000000:policy/lambda-permissions `
+	 --endpoint-url http://localhost:4566
+ - for checking the attached policies for the role:  aws iam list-attached-role-policies `
+	 --role-name lambda-execution-role `
+	 --endpoint-url http://localhost:4566
+
+--- steps to create the lambda functions 
+ - upload function : aws lambda create-function `
+	 --function-name upload-handler `
+	 --runtime java21 `
+	 --handler com.badri.handlers.FileUploadHandler::handleRequest `
+	 --role arn:aws:iam::000000000000:role/lambda-execution-role `
+	 --zip-file fileb://C:\Users\HP\OneDrive\Desktop\ServerlessFileProcessing\serverlessfileprocessing\target	 	    	\serverlessfileprocessing-0.0.1-SNAPSHOT.jar `
+   	 --endpoint-url http://localhost:4566
+- process handler : aws lambda create-function `
+	 --function-name process-handler `
+	 --runtime java21 `
+	 --handler com.badri.handlers.ProcessHandler::handleRequest `
+	 --role arn:aws:iam::000000000000:role/lambda-execution-role `
+	 --zip-file fileb://C:\Users\HP\OneDrive\Desktop\ServerlessFileProcessing\serverlessfileprocessing\target				  \serverlessfileprocessing-0.0.1-SNAPSHOT.jar `
+	 --endpoint-url http://localhost:4566
+- fetch handler : aws lambda create-function `
+	 --function-name fetch-handler `
+	 --runtime java21 `
+	 --handler com.badri.handlers.FetchHandler::handleRequest `
+	 --role arn:aws:iam::000000000000:role/lambda-execution-role `
+	 --zip-file fileb://C:\Users\HP\OneDrive\Desktop\ServerlessFileProcessing\serverlessfileprocessing\target  	 	\serverlessfileprocessing-0.0.1-SNAPSHOT.jar `
+	 --endpoint-url http://localhost:4566
+ - dummy request for invoking lambda function: aws lambda invoke `
+	 --function-name upload-handler `
+	 --payload '{ "body": "{\"fileName\":\"test.txt\",\"fileContent\":\"SGVsbG8=\"}" }' `
+	 --cli-binary-format raw-in-base64-out `
+	 response.json `
+	 --endpoint-url http://localhost:4566
+
+---  need to give the permission to s3 for triggering the process-handler 
+
+- aws lambda add-permission `
+>>   --function-name process-handler `
+>>   --statement-id s3invoke `
+>>   --action "lambda:InvokeFunction" `
+>>   --principal s3.amazonaws.com `
+>>   --source-arn arn:aws:s3:::file-bucket `
+>>   --endpoint-url http://localhost:4566
+
+-- need to add the bucket notification config for triggering
+
+aws s3api put-bucket-notification-configuration `
+>>   --bucket file-bucket `
+>>   --notification-configuration file://notification.json `
+>>   --endpoint-url http://localhost:4566
+
+
+
+-- gateway integration
+ - need to create a container for holding our api's : aws apigateway create-rest-api `
+>> --name "file-api" `
+>> --endpoint-url http://localhost:4566
+{
+    "id": "ctb2d7yx67",
+    "name": "file-api",
+    "createdDate": "2026-04-09T16:45:37+05:30",
+    "apiKeySource": "HEADER",
+    "endpointConfiguration": {
+        "types": [
+            "EDGE"
+        ],
+        "ipAddressType": "ipv4"
+    },
+    "disableExecuteApiEndpoint": false,
+    "rootResourceId": "7uubygy6ym"
+}
+
+- then need to find the root resource (it like a main door then we will attach our api's to this)
+aws apigateway get-resources `
+>> --rest-api-id ctb2d7yx67 `
+>> --endpoint-url http://localhost:4566
+{
+    "items": [
+        {
+            "id": "7uubygy6ym",
+            "path": "/"
+        }
+    ]
+}
+
+- need to create resource under the root 
+
+aws apigateway create-resource `
+>> --rest-api-id ctb2d7yx67 `
+>> --parent-id 7uubygy6ym `
+>> --path-part upload `
+>> --endpoint-url http://localhost:4566
+{
+    "id": "8zm8ajfklf",
+    "parentId": "7uubygy6ym",
+    "pathPart": "upload",
+    "path": "/upload"
+}
+
+- need to attach the method
+
+ aws apigateway put-method `
+>> --rest-api-id ctb2d7yx67 `
+>> --resource-id 8zm8ajfklf `
+>> --http-method POST `
+>> --authorization-type NONE `
+>> --endpoint-url http://localhost:4566
+{
+    "httpMethod": "POST",
+    "authorizationType": "NONE",
+    "apiKeyRequired": false
+}
+
+- need to connect upload lambda handler 
+
+ aws apigateway put-integration `
+>> --rest-api-id ctb2d7yx67 `
+>> --resource-id 8zm8ajfklf `
+>> --http-method POST `
+>> --type AWS_PROXY `
+>> --integration-http-method POST `
+>> --uri arn:aws:apigateway:ap-south-1:lambda:path/2015-03-31/functions/arn:aws:lambda:ap-south-1:000000000000:function:upload-handler/invocations `
+>> --endpoint-url http://localhost:4566
+{
+    "type": "AWS_PROXY",
+    "httpMethod": "POST",
+    "uri": "arn:aws:apigateway:ap-south-1:lambda:path/2015-03-31/functions/arn:aws:lambda:ap-south-1:000000000000:function:upload-handler/invocations",
+    "passthroughBehavior": "WHEN_NO_MATCH",
+    "timeoutInMillis": 29000,
+    "cacheNamespace": "8zm8ajfklf",
+    "cacheKeyParameters": []
+}
+   
+
+-- deploy rest api container
+
+ aws apigateway create-deployment `
+>> --rest-api-id ctb2d7yx67 `
+>> --stage-name DEV `
+>> --endpoint-url http://localhost:4566
+{
+    "id": "hlkraa10qv",
+    "createdDate": "2026-04-09T17:10:38+05:30"
+}
+
+-- calling the apigateway api's 
+
+PS C:\Users\HP> Invoke-RestMethod -Method POST `
+>>   -Uri http://localhost:4566/restapis/ctb2d7yx67/DEV/_user_request_/upload `
+>>   -Body '{"fileName":"badri.txt","fileContent":"SGVsbG8="}' `
+>>   -ContentType "application/json"
+data is uploaded to the cloud
+PS C:\Users\HP> Invoke-RestMethod `
+>>   -Uri http://localhost:4566/restapis/ctb2d7yx67/DEV/_user_request_/file/7b767756-8cdf-4dda-89f8-558bd7056992
+Hello
+
+
+
+
+
+- Lambda is designed to receive an event, so internally it uses POST, but the client can still use GET with API Gateway.
