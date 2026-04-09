@@ -37,7 +37,7 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 	private static final ObjectMapper mapper = new ObjectMapper();
 	
 	private static final LambdaClient LAMBDACLIENT =  LambdaClient.builder()
-			.endpointOverride(URI.create("http://localhost:4566"))
+			.endpointOverride(URI.create("http://localstack:4566"))
 			.region(Region.AP_SOUTH_1)
 			.credentialsProvider(
 					StaticCredentialsProvider.create(
@@ -57,7 +57,7 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 			 .build();
 	
 	private static final DynamoDbClient ddc = DynamoDbClient.builder()
-			.endpointOverride(URI.create("http://localhost:4566"))
+			.endpointOverride(URI.create("http://localstack:4566"))
 			 .region(Region.AP_SOUTH_1)
 			 .credentialsProvider(
 					 StaticCredentialsProvider.create(
@@ -71,7 +71,8 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 	public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent request, Context context) {
 		try {
 			
-			context.getLogger().log("----Upload hanlder called-----");
+			context.getLogger().log("----Upload handler called-----");
+
 			String jsonBody = request.getBody();
 			
 			Map<String,String> data = mapper.readValue(jsonBody,Map.class);
@@ -88,6 +89,22 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 			
 			byte[] fileBytes = Base64.getDecoder().decode(data.get("fileContent"));
 			
+			String tableName = "FileMetaData";
+			
+			String createdAt = Instant.now().toString();
+			
+			String status = "unprocessed";
+			
+			int lineCount = 0;
+			
+			context.getLogger().log("Before uploading to filemetadata table");
+			
+			putItemInTable(ddc, tableName, bucketName, keyVal, createdAt, fileId, status, lineCount);
+			
+			context.getLogger().log("After uploading to filemetada table");
+			
+			context.getLogger().log("meta data uploaded to the dynamodb table");
+			
 			PutObjectRequest req = PutObjectRequest.builder()
 					.bucket(bucketName)
 					.key(keyVal)
@@ -98,87 +115,30 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 			context.getLogger().log("File uploaded to s3");
 			
 			
-			String tableName = "FileMetaData";
-			
-			String createdAt = Instant.now().toString();
-			
-			String status = "unprocessed";
-			
-			int lineCount = 0;
-			
-			putItemInTable(ddc, tableName, bucketName, fileName, createdAt, fileId, status, lineCount);
-			
-			context.getLogger().log("meta data uploaded to the dynamodb table");
-			
-			allowS3ToTriggerLambda(LAMBDACLIENT);
-			
-			createS3Trigger("lksljflsjkflsdjflsdfjlsd");  // need to update this
-			
 			return new APIGatewayProxyResponseEvent()
 					.withStatusCode(201)
-					.withBody("data is uploaded to the clount");
+					.withBody("data is uploaded to the cloud");
 		
 		} catch(Exception e) {
 			return new APIGatewayProxyResponseEvent()
 					.withStatusCode(500)
 					.withBody("Something went wrong. please try again");
 		}
-		return null;
 	}
 	
-	public void allowS3ToTriggerLambda(LambdaClient client) {
-		AddPermissionRequest request = AddPermissionRequest.builder()
-				.functionName("FileProcessingLambda")
-				.statementId("s3-trigger-1")
-				.action("lambda:InvokeFunction")
-				.principal("s3.amazonaws.com")
-				.sourceArn("arn:aws:s3:::file-bucket")
-				.build();
-		
-		client.addPermission(request);
-		
-		System.out.println("permission granted for the s3 to trigger lambda function");
-	}
+
 	
-	public void createS3Trigger(String lambdaArn) {
-			
-			// 1. Setup a filter so it only looks for .pdf files
-//			S3KeyFilter keyFilter = S3KeyFilter.builder()
-//					.filterRules(FilterRule.builder().name(FilterRuleName.SUFFIX).value(".pdf").build())
-//					.build();
-//			
-//			NotificationConfigurationFilter filter = NotificationConfigurationFilter.builder()
-//					.key(keyFilter)
-//					.build();
-			
-			// 2. Point to your Lambda
-			LambdaFunctionConfiguration lambdaConfig = LambdaFunctionConfiguration.builder()
-					.lambdaFunctionArn(lambdaArn)
-					.events(Event.S3_OBJECT_CREATED_PUT)
-					.build();
-			
-			// 3. Apply the config to the bucket
-			PutBucketNotificationConfigurationRequest request = PutBucketNotificationConfigurationRequest.builder()
-					.bucket("file-bucket")
-					.notificationConfiguration(NotificationConfiguration.builder().lambdaFunctionConfigurations(lambdaConfig).build())
-					.build();
-			
-			S3CLIENT.putBucketNotificationConfiguration(request);
-			
-			System.out.println("Trigger Created");
-		}
-	
-	public void putItemInTable(DynamoDbClient ddc, String tableName, String bucketName, String fileName, String createdAt, String fileId, String status,int lineCount) {
+	public void putItemInTable(DynamoDbClient ddc, String tableName, String bucketName, String s3Key, String createdAt, String fileId, String status,int lineCount) {
 		try {
 			
 			HashMap<String, AttributeValue> itemValues = new HashMap<>();
 			
 			itemValues.put("fileId", AttributeValue.builder().s(fileId).build());
 			itemValues.put("bucketName", AttributeValue.builder().s(bucketName).build());
-			itemValues.put("s3Key", AttributeValue.builder().s(fileName).build());
+			itemValues.put("s3Key", AttributeValue.builder().s(s3Key).build());
 			itemValues.put("createdAt", AttributeValue.builder().s(createdAt).build());
 			itemValues.put("status", AttributeValue.builder().s(status).build());
-			itemValues.put("lineCount", AttributeValue.builder().n(String.valueOf(lineCount)));
+			itemValues.put("lineCount", AttributeValue.builder().n(String.valueOf(lineCount)).build());
 			PutItemRequest request = PutItemRequest.builder()
 					.item(itemValues)
 					.tableName(tableName)

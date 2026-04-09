@@ -37,7 +37,7 @@ public class FetchHandler implements RequestHandler<APIGatewayProxyRequestEvent,
 			 .build();
 	
 	private static final DynamoDbClient ddc = DynamoDbClient.builder()
-			.endpointOverride(URI.create("http://localhost:4566"))
+			.endpointOverride(URI.create("http://localstack:4566"))
 			 .region(Region.AP_SOUTH_1)
 			 .credentialsProvider(
 					 StaticCredentialsProvider.create(
@@ -91,9 +91,8 @@ public class FetchHandler implements RequestHandler<APIGatewayProxyRequestEvent,
 		} catch(Exception e) {
 			return new APIGatewayProxyResponseEvent()
 					.withStatusCode(500)
-					.withBody("Something went wrong");
+					.withBody(e.getMessage());
 		}
-		return null;
 	}
 
 }

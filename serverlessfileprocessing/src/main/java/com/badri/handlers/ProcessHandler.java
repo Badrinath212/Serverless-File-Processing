@@ -35,7 +35,7 @@ public class ProcessHandler implements RequestHandler<S3Event, Void>{
 			 .build();
 	
 	private static final DynamoDbClient ddc = DynamoDbClient.builder()
-			.endpointOverride(URI.create("http://localhost:4566"))
+			.endpointOverride(URI.create("http://localstack:4566"))
 			 .region(Region.AP_SOUTH_1)
 			 .credentialsProvider(
 					 StaticCredentialsProvider.create(
@@ -83,12 +83,15 @@ public class ProcessHandler implements RequestHandler<S3Event, Void>{
 				    }
 				}
 				
-				String fileId = objKey.split("/")[1].split("-")[0];
+				String fileId = objKey.substring(0, objKey.lastIndexOf("-"));
+				
+				context.getLogger().log("Before updateitemrequest ");
 				
 				UpdateItemRequest req = UpdateItemRequest.builder()
 						.key(Map.of("fileId",AttributeValue.builder().s(fileId).build()))
-						.updateExpression("SET status = :status, lineCount = :lc")
-						//.expressionAttributeNames(Map.of("#s","status"))
+						.tableName("FileMetaData")
+						.updateExpression("SET #s = :status, lineCount = :lc")
+						.expressionAttributeNames(Map.of("#s","status"))
 						.expressionAttributeValues(Map.of(":status",AttributeValue.builder().s("processed").build(),":lc", 
 								AttributeValue.builder().n(String.valueOf(lineCount)).build()))
 						.build();
