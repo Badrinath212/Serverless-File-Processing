@@ -241,3 +241,37 @@ Hello
 
 
 - Lambda is designed to receive an event, so internally it uses POST, but the client can still use GET with API Gateway.
+
+
+
+--- adding the decoupling and retry mechanism using the amazon sqs
+
+-- need to create the message sender lambda function 
+-- need to create the queue :  aws sqs create-queue `
+>> --queue-name file-processing-queue `
+>> --endpoint-url http://localhost:4566
+
+--- need to create the event source mapping b/w the sqs and the lambda
+
+aws lambda create-event-source-mapping `
+>> --function-name Process-handler `
+>> --event-source-arn arn:aws:sqs:ap-south-1:000000000000:file-processing-queue `
+>> --endpoint-url http://localhost:4566
+
+--- failure case will be handled by the sqs by retrying continuously to the respective event resource mapping 
+--- Lambda service polls SQS based on the event source mapping and invokes the function when messages are available.
+
+--- need to add the dead letter queue for the main queue (because it retries continuously then we need to put the restriction)
+
+PS C:\Users\HP> @'
+>> {
+>>   "RedrivePolicy": "{\"deadLetterTargetArn\":\"arn:aws:sqs:ap-south-1:000000000000:file-processing-dlq\",\"maxReceiveCount\":\"3\"}"
+>> }
+>> '@ | Set-Content -Encoding ascii attributes.json
+PS C:\Users\HP> aws --endpoint-url=http://localhost:4566 sqs set-queue-attributes `
+>>   --queue-url http://localhost:4566/000000000000/file-processing-queue `
+>>   --attributes file://attributes.json
+
+
+
+
