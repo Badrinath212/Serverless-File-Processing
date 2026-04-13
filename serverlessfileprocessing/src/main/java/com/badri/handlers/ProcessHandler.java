@@ -7,7 +7,10 @@ import java.util.Map;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.S3Event;
+import com.amazonaws.services.lambda.runtime.events.SQSEvent;
+import com.amazonaws.services.lambda.runtime.events.SQSEvent.SQSMessage;
 import com.amazonaws.services.lambda.runtime.events.models.s3.S3EventNotification;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -22,7 +25,7 @@ import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 
-public class ProcessHandler implements RequestHandler<S3Event, Void>{
+public class ProcessHandler implements RequestHandler<SQSEvent, Void>{
 	
 	private static final S3Client S3CLIENT = S3Client.builder()
 			 .endpointOverride(URI.create("http://localstack:4566"))
@@ -45,7 +48,7 @@ public class ProcessHandler implements RequestHandler<S3Event, Void>{
 			 .build();
 
 	@Override
-	public Void handleRequest(S3Event event, Context context) {
+	public Void handleRequest(SQSEvent event, Context context) {
 		try {
 			context.getLogger().log("------process handler started--------");
 			if(event == null) {
@@ -58,13 +61,19 @@ public class ProcessHandler implements RequestHandler<S3Event, Void>{
 			}
 			context.getLogger().log("Records size:" + event.getRecords().size());
 			
-			for(S3EventNotification.S3EventNotificationRecord record: event.getRecords()) {
-				String bucketName = record.getS3().getBucket().getName();
+			for(SQSMessage record: event.getRecords()) {
+				String body = record.getBody();
 				
-				String objKey = java.net.URLDecoder.decode(
-	                    record.getS3().getObject().getKey(),
-	                    java.nio.charset.StandardCharsets.UTF_8
-	            );
+				ObjectMapper mapper = new ObjectMapper();
+				
+				Map<String,String> data = mapper.readValue(body, Map.class);
+				
+				String bucketName = data.get("bucket");
+				
+				String objKey = data.get("key");
+				
+				context.getLogger().log("bucket name: " + bucketName);
+				context.getLogger().log("bucket key: " + objKey);
 				
 				GetObjectRequest request = GetObjectRequest.builder()
 						.bucket(bucketName)
