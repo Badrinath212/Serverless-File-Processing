@@ -1,6 +1,8 @@
 package com.badri.handlers;
 
 import java.net.URI;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Base64;
@@ -15,6 +17,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -79,15 +82,23 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 			
 			String fileName = data.get("fileName");
 			
-			UUID uuid = UUID.randomUUID();
+			byte[] fileBytes = Base64.getDecoder().decode(data.get("fileContent"));
 			
-			String fileId = uuid.toString();
+			String fileId = generateFileId(fileBytes);
 			
 			String keyVal = fileId + "-" + fileName;
 			
 			String bucketName = "file-bucket";
 			
-			byte[] fileBytes = Base64.getDecoder().decode(data.get("fileContent"));
+			PutObjectRequest req = PutObjectRequest.builder()
+					.bucket(bucketName)
+					.key(keyVal)
+					.build();
+			
+			S3CLIENT.putObject(req, RequestBody.fromBytes(fileBytes));
+			
+			context.getLogger().log("File uploaded to s3");
+			
 			
 			String tableName = "FileMetaData";
 			
@@ -101,23 +112,17 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 			
 			putItemInTable(ddc, tableName, bucketName, keyVal, createdAt, fileId, status, lineCount);
 			
-			context.getLogger().log("After uploading to filemetada table");
 			
 			context.getLogger().log("meta data uploaded to the dynamodb table");
-			
-			PutObjectRequest req = PutObjectRequest.builder()
-					.bucket(bucketName)
-					.key(keyVal)
-					.build();
-			
-			S3CLIENT.putObject(req, RequestBody.fromBytes(fileBytes));
-			
-			context.getLogger().log("File uploaded to s3");
 			
 			
 			return new APIGatewayProxyResponseEvent()
 					.withStatusCode(201)
 					.withBody("data is uploaded to the cloud");
+		} catch(ConditionalCheckFailedException e) {
+			return new APIGatewayProxyResponseEvent()
+					.withBody("File already there")
+					.withStatusCode(400);
 		
 		} catch(Exception e) {
 			return new APIGatewayProxyResponseEvent()
@@ -129,8 +134,6 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 
 	
 	public void putItemInTable(DynamoDbClient ddc, String tableName, String bucketName, String s3Key, String createdAt, String fileId, String status,int lineCount) {
-		try {
-			
 			HashMap<String, AttributeValue> itemValues = new HashMap<>();
 			
 			itemValues.put("fileId", AttributeValue.builder().s(fileId).build());
@@ -142,14 +145,24 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 			PutItemRequest request = PutItemRequest.builder()
 					.item(itemValues)
 					.tableName(tableName)
+					.conditionExpression("attribute_not_exists(s3Key)")
 					.build();
 			
 			ddc.putItem(request);
 			
-			
-		} catch(Exception e) {
-			e.printStackTrace();
-		}
+	}
+	
+	public String generateFileId(byte[] fileBytes) throws NoSuchAlgorithmException {
+	    MessageDigest digest = MessageDigest.getInstance("SHA-256");
+	    byte[] hashBytes = digest.digest(fileBytes);
+
+	    StringBuilder hexString = new StringBuilder();
+	    for (byte b : hashBytes) {
+	        String hex = Integer.toHexString(0xff & b);
+	        if (hex.length() == 1) hexString.append('0');
+	        hexString.append(hex);
+	    }
+	    return hexString.toString();
 	}
 
 	

@@ -19,6 +19,8 @@ import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
@@ -75,6 +77,20 @@ public class ProcessHandler implements RequestHandler<SQSEvent, Void>{
 				context.getLogger().log("bucket name: " + bucketName);
 				context.getLogger().log("bucket key: " + objKey);
 				
+				GetItemRequest itemReqeust = GetItemRequest.builder()
+						.key(Map.of("s3Key",AttributeValue.builder().s(objKey).build()))
+						.tableName("FileMetaData")
+						.build();
+				
+				GetItemResponse itemResponse = ddc.getItem(itemReqeust);
+				
+				String status = itemResponse.item().get("status").s();
+				
+				if("processed".equals(status)) {
+					context.getLogger().log("Item already processed");
+					continue;
+				}
+				
 				GetObjectRequest request = GetObjectRequest.builder()
 						.bucket(bucketName)
 						.key(objKey)
@@ -97,7 +113,7 @@ public class ProcessHandler implements RequestHandler<SQSEvent, Void>{
 				context.getLogger().log("Before updateitemrequest ");
 				
 				UpdateItemRequest req = UpdateItemRequest.builder()
-						.key(Map.of("fileId",AttributeValue.builder().s(fileId).build()))
+						.key(Map.of("s3Key",AttributeValue.builder().s(objKey).build()))
 						.tableName("FileMetaData")
 						.updateExpression("SET #s = :status, lineCount = :lc")
 						.expressionAttributeNames(Map.of("#s","status"))

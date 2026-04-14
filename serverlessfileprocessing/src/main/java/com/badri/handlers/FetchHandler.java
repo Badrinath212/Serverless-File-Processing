@@ -1,6 +1,7 @@
 package com.badri.handlers;
 
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
 
 import com.amazonaws.services.lambda.runtime.Context;
@@ -18,6 +19,8 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
+import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
+import software.amazon.awssdk.services.dynamodb.model.QueryResponse;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -62,15 +65,25 @@ public class FetchHandler implements RequestHandler<APIGatewayProxyRequestEvent,
 			
 			String fileId = pathParameters.get("fileId");
 			
-			GetItemRequest itemRequest = GetItemRequest.builder()
-											.key(Map.of("fileId",AttributeValue.builder().s(fileId).build()))
-											.tableName("FileMetaData")
-											.attributesToGet("bucketName", "s3Key")
-											.build();
+			QueryRequest queryReqest = QueryRequest.builder()
+					.tableName("FileMetaData")
+					.indexName("IndexForFileId")
+					.keyConditionExpression("fileId = :val")
+					.expressionAttributeValues(Map.of(":val",AttributeValue.builder().s(fileId).build()))
+					.build();
 			
-			GetItemResponse itemResponse = ddc.getItem(itemRequest);
 			
-			Map<String, AttributeValue> data = itemResponse.item();
+			QueryResponse response = ddc.query(queryReqest);
+			
+			
+			List<Map<String, AttributeValue>> items = response.items();
+			
+			if(items == null || items.isEmpty()) return new APIGatewayProxyResponseEvent()
+					.withBody("file is not found")
+					.withStatusCode(400);
+			
+			Map<String,AttributeValue> data = items.get(0);
+			
 			
 			String bucketName = data.get("bucketName").s();
 			String s3Key = data.get("s3Key").s();
