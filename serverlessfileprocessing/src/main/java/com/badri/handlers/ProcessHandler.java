@@ -116,6 +116,7 @@ public class ProcessHandler implements RequestHandler<SQSEvent, Void>{
 						.key(Map.of("s3Key",AttributeValue.builder().s(objKey).build()))
 						.tableName("FileMetaData")
 						.updateExpression("SET #s = :status, lineCount = :lc")
+						.conditionExpression("#s <> :status")
 						.expressionAttributeNames(Map.of("#s","status"))
 						.expressionAttributeValues(Map.of(":status",AttributeValue.builder().s("processed").build(),":lc", 
 								AttributeValue.builder().n(String.valueOf(lineCount)).build()))
