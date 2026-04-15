@@ -2,6 +2,7 @@ package com.badri.handlers;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Map;
 
 import com.amazonaws.services.lambda.runtime.Context;
@@ -19,6 +20,7 @@ import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
@@ -77,17 +79,27 @@ public class ProcessHandler implements RequestHandler<SQSEvent, Void>{
 				context.getLogger().log("bucket name: " + bucketName);
 				context.getLogger().log("bucket key: " + objKey);
 				
-				GetItemRequest itemReqeust = GetItemRequest.builder()
-						.key(Map.of("s3Key",AttributeValue.builder().s(objKey).build()))
-						.tableName("FileMetaData")
-						.build();
 				
-				GetItemResponse itemResponse = ddc.getItem(itemReqeust);
-				
-				String status = itemResponse.item().get("status").s();
-				
-				if("processed".equals(status)) {
-					context.getLogger().log("Item already processed");
+				try {
+					long currentTime = System.currentTimeMillis() / 1000;
+					long fiveMinutesAgo = currentTime-300;
+					UpdateItemRequest locReq = UpdateItemRequest.builder()
+							.tableName("FileMetaData")
+							.key(Map.of("s3Key", AttributeValue.builder().s(objKey).build()))
+							.updateExpression("SET #s = :processing, lastUpdatedAt = :lastUpdatedAt")
+							.conditionExpression("#s = :unprocessed OR #s = :failed OR (#s = :processing AND lastUpdatedAt < :expiry)")
+							.expressionAttributeNames(Map.of("#s","status"))
+							.expressionAttributeValues(Map.of(
+									":processing", AttributeValue.builder().s("PROCESSING").build(),
+									":unprocessed", AttributeValue.builder().s("UNPROCESSED").build(),
+									":failed", AttributeValue.builder().s("FAILED").build(),
+									":lastUpdatedAt", AttributeValue.builder().n(String.valueOf(currentTime)).build(),
+									":expiry", AttributeValue.builder().n(String.valueOf(fiveMinutesAgo)).build()
+									))
+							.build();
+					ddc.updateItem(locReq); 
+				} catch(ConditionalCheckFailedException e) {
+					context.getLogger().log("Another lambda is processing, skipping");
 					continue;
 				}
 				
@@ -112,18 +124,33 @@ public class ProcessHandler implements RequestHandler<SQSEvent, Void>{
 				
 				context.getLogger().log("Before updateitemrequest ");
 				
-				UpdateItemRequest req = UpdateItemRequest.builder()
-						.key(Map.of("s3Key",AttributeValue.builder().s(objKey).build()))
-						.tableName("FileMetaData")
-						.updateExpression("SET #s = :status, lineCount = :lc")
-						.conditionExpression("#s <> :status")
-						.expressionAttributeNames(Map.of("#s","status"))
-						.expressionAttributeValues(Map.of(":status",AttributeValue.builder().s("processed").build(),":lc", 
-								AttributeValue.builder().n(String.valueOf(lineCount)).build()))
-						.build();
+				try {
+					UpdateItemRequest req = UpdateItemRequest.builder()
+							.key(Map.of("s3Key",AttributeValue.builder().s(objKey).build()))
+							.tableName("FileMetaData")
+							.updateExpression("SET #s = :status, lineCount = :lc")
+							.conditionExpression("#s <> :status")
+							.expressionAttributeNames(Map.of("#s","status"))
+							.expressionAttributeValues(Map.of(":status",AttributeValue.builder().s("PROCESSED").build(),":lc", 
+									AttributeValue.builder().n(String.valueOf(lineCount)).build()))
+							.build();
+					
+					ddc.updateItem(req);
+					context.getLogger().log("file proccessed data updadted to table");
+				} catch (Exception e) {
+					UpdateItemRequest falReq = UpdateItemRequest.builder()
+							.key(Map.of("s3Key",AttributeValue.builder().s(objKey).build()))
+							.tableName("FileMetaData")
+							.updateExpression("SET #s = :status")
+							.expressionAttributeNames(Map.of("#s","status"))
+							.expressionAttributeValues(Map.of(":status",AttributeValue.builder().s("FAILED").build()))
+							.build();
+					
+					ddc.updateItem(falReq);
+					context.getLogger().log("processing is failed");
+					throw e;
+				}
 				
-				ddc.updateItem(req);
-				context.getLogger().log("file proccessed data updadted to table");
 				
 			}
 			

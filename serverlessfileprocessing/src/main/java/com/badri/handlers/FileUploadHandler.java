@@ -104,7 +104,7 @@ public class FileUploadHandler implements RequestHandler<APIGatewayProxyRequestE
 			
 			String createdAt = Instant.now().toString();
 			
-			String status = "unprocessed";
+			String status = "UNPROCESSED";
 			
 			int lineCount = 0;
 			
